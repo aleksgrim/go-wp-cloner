@@ -21,7 +21,8 @@
     "certbot_email": "",
     "nginx_cache_path": "/var/cache/nginx/fastcgi",
     "nginx_cache_zone": "FASTCGI_CACHE",
-    "command_timeout_sec": 600
+    "command_timeout_sec": 600,
+    "log_retention_days": 30
   },
   "credentials": {
     "dir": "./credentials"

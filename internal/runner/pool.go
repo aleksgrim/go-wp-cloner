@@ -11,6 +11,7 @@ import (
 
 	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
 	"github.com/aleksgrim/go-wp-cloner/internal/config"
+	"github.com/aleksgrim/go-wp-cloner/internal/logger"
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
@@ -40,15 +41,17 @@ type Pool struct {
 	domains []string
 	onEvent func(Event)
 	sysMu   *sync.Mutex // global mutex for all workers
+	log     *logger.Logger
 }
 
 // New initializes a new Pool with the given configuration and domain list.
-func New(cfg *config.Config, domains []string, onEvent func(Event)) *Pool {
+func New(cfg *config.Config, domains []string, log *logger.Logger, onEvent func(Event)) *Pool {
 	return &Pool{
 		cfg:     cfg,
 		domains: domains,
 		onEvent: onEvent,
 		sysMu:   &sync.Mutex{},
+		log:     log,
 	}
 }
 
@@ -84,8 +87,22 @@ func (p *Pool) Run() []cloner.Result {
 			)
 			defer client.Close()
 
+			p.log.DomainStart(domain)
+
 			c := cloner.New(p.cfg, client, p.sysMu)
 			result := c.Clone(domain, func(d string, step cloner.Step) {
+				// Log step to file.
+				switch step.Status {
+				case cloner.StatusRunning:
+					p.log.Step(d, "RUNNING", step.Name, "")
+				case cloner.StatusDone:
+					p.log.Step(d, "OK", step.Name, fmtDur(step.Elapsed))
+				case cloner.StatusFailed:
+					p.log.Step(d, "FAILED", step.Name, step.Error)
+				case cloner.StatusSkipped:
+					p.log.Step(d, "SKIP", step.Name, "")
+				}
+
 				p.onEvent(Event{
 					Type:   EventStep,
 					Domain: d,
@@ -100,6 +117,8 @@ func (p *Pool) Run() []cloner.Result {
 					fmt.Fprintf(os.Stderr, "⚠️  credentials for %s: %v\n", domain, err)
 				}
 			}
+
+			p.log.DomainDone(domain, result.Success, result.Elapsed, result.ErrStr)
 
 			n := int(done.Add(1))
 

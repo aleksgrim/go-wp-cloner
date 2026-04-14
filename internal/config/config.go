@@ -43,6 +43,7 @@ type CloneConfig struct {
 	NginxCachePath    string `json:"nginx_cache_path"`
 	NginxCacheZone    string `json:"nginx_cache_zone"`
 	CommandTimeoutSec int    `json:"command_timeout_sec"`
+	LogRetentionDays  int    `json:"log_retention_days"`
 }
 
 // CredConfig contains local storage settings for generated passwords.
@@ -139,6 +140,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Clone.CommandTimeoutSec == 0 {
 		cfg.Clone.CommandTimeoutSec = 600 // 10 minutes per command
+	}
+	if cfg.Clone.LogRetentionDays == 0 {
+		cfg.Clone.LogRetentionDays = 30
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
 	"github.com/aleksgrim/go-wp-cloner/internal/config"
+	"github.com/aleksgrim/go-wp-cloner/internal/logger"
 	"github.com/aleksgrim/go-wp-cloner/internal/runner"
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
@@ -58,6 +59,20 @@ func main() {
 
 	printHeader(cfg, domains)
 
+	// ── Initialise logger ──────────────────────────────────────────────────
+	logger.Cleanup("logs", cfg.Clone.LogRetentionDays)
+	log, err := logger.New("logs")
+	if err != nil {
+		// Non-fatal: warn and continue without file logging.
+		fmt.Fprintf(os.Stderr, "⚠️  logger: %v — logging disabled\n", err)
+		log = nil
+	} else {
+		defer log.Close()
+		fmt.Printf("  Log file:   %s\n\n", log.Path())
+		log.Info("=== wp-cloner v%s started — %d domains, %d workers ===",
+			version, len(domains), cfg.Clone.Workers)
+	}
+
 	if *dryRun {
 		fmt.Printf("\n[DRY RUN] %d domains:\n\n", len(domains))
 		fmt.Printf("  %-5s  %-35s  %-28s  %-25s  %s\n", "#", "DOMAIN", "SYSTEM USER", "DB NAME", "WEBROOT")
@@ -76,9 +91,24 @@ func main() {
 	}
 
 	startTime := time.Now()
-	pool := runner.New(cfg, domains, func(e runner.Event) { printEvent(e) })
+	pool := runner.New(cfg, domains, log, func(e runner.Event) { printEvent(e) })
 	results := pool.Run()
-	fmt.Println(runner.Summary(results, time.Since(startTime), cfg.Credentials.Dir))
+
+	summaryStr := runner.Summary(results, time.Since(startTime), cfg.Credentials.Dir)
+	fmt.Println(summaryStr)
+
+	// Write batch summary to log.
+	if log != nil {
+		var ok, fail int
+		for _, r := range results {
+			if r.Success {
+				ok++
+			} else {
+				fail++
+			}
+		}
+		log.Summary(len(results), ok, fail, time.Since(startTime))
+	}
 }
 
 // printHeader displays the tool's branding and the current configuration plan.
