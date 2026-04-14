@@ -397,7 +397,6 @@ func (c *Cloner) stepMySQL(siteName, dbPass string) error {
 			`%s -e "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';"`,
 			auth, siteName, dbPass,
 		),
-		// Обновляем пароль если юзер уже существовал с другим паролем
 		fmt.Sprintf(
 			`%s -e "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';"`,
 			auth, siteName, dbPass,
@@ -412,6 +411,17 @@ func (c *Cloner) stepMySQL(siteName, dbPass string) error {
 			return err
 		}
 	}
+
+	// Импортируем дамп из источника
+	importCmd := fmt.Sprintf(
+		"sudo mysqldump -uroot -p'%s' %s | sudo mysql -uroot -p'%s' %s",
+		rootPass, c.cfg.Source.DBName,
+		rootPass, siteName,
+	)
+	if _, err := c.client.RunOrFail(importCmd); err != nil {
+		return fmt.Errorf("импорт дампа: %w", err)
+	}
+
 	return nil
 }
 
