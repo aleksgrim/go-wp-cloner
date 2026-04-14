@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Config represents the full application configuration structure.
 type Config struct {
 	Server      ServerConfig `json:"server"`
 	Source      SourceConfig `json:"source"`
@@ -14,6 +15,7 @@ type Config struct {
 	Credentials CredConfig   `json:"credentials"`
 }
 
+// ServerConfig contains target server SSH connection details.
 type ServerConfig struct {
 	Host    string `json:"host"`
 	Port    int    `json:"port"`
@@ -21,6 +23,7 @@ type ServerConfig struct {
 	KeyPath string `json:"key_path"`
 }
 
+// SourceConfig contains the configuration for the source WordPress site to be cloned.
 type SourceConfig struct {
 	Domain string `json:"domain"`
 	WPPath string `json:"wp_path"`
@@ -29,6 +32,7 @@ type SourceConfig struct {
 	DBPass string `json:"db_pass"`
 }
 
+// CloneConfig contains general settings for the cloning process and isolation target.
 type CloneConfig struct {
 	Workers        int    `json:"workers"`
 	PHPVersion     string `json:"php_version"`
@@ -40,11 +44,12 @@ type CloneConfig struct {
 	NginxCacheZone string `json:"nginx_cache_zone"`
 }
 
+// CredConfig contains local storage settings for generated passwords.
 type CredConfig struct {
 	Dir string `json:"dir"`
 }
 
-// SiteUser: "alex2-site-1.g" → "alex2-site-1---admin"
+// SiteUser returns the Linux system username for a given domain.
 func (c *CloneConfig) SiteUser(domain string) string {
 	name := stripTLD(domain)
 	suffix := c.UsernameSuffix
@@ -54,32 +59,32 @@ func (c *CloneConfig) SiteUser(domain string) string {
 	return name + suffix
 }
 
-// SiteName: "alex2-site-1.g" → "alex2_site_1"  (db_name и db_user)
+// SiteName returns a sanitized name suitable for database and database user names.
 func SiteName(domain string) string {
 	return strings.NewReplacer("-", "_", ".", "_").Replace(stripTLD(domain))
 }
 
-// Webroot: "/var/www/{site_user}/{domain}/public"
+// Webroot returns the absolute path to the site's public directory.
 func (c *CloneConfig) Webroot(domain string) string {
 	return fmt.Sprintf("/var/www/%s/%s/public", c.SiteUser(domain), domain)
 }
 
-// ChrootDir: "/var/www/{site_user}"
+// ChrootDir returns the absolute path to the directory that will be used for SFTP chroot.
 func (c *CloneConfig) ChrootDir(domain string) string {
 	return fmt.Sprintf("/var/www/%s", c.SiteUser(domain))
 }
 
-// SockName: "php8.5-fpm-alex2-site-1"
+// SockName returns the name of the PHP-FPM socket file.
 func (c *CloneConfig) SockName(domain string) string {
 	return fmt.Sprintf("php%s-fpm-%s", c.PHPVersion, stripTLD(domain))
 }
 
-// SockPath: "/run/php/php8.5-fpm-alex2-site-1.sock"
+// SockPath returns the absolute path to the PHP-FPM socket.
 func (c *CloneConfig) SockPath(domain string) string {
 	return fmt.Sprintf("/run/php/%s.sock", c.SockName(domain))
 }
 
-// PoolName == SiteUser
+// PoolName returns the name of the PHP-FPM pool, which matches the system username.
 func (c *CloneConfig) PoolName(domain string) string {
 	return c.SiteUser(domain)
 }
@@ -91,21 +96,22 @@ func stripTLD(domain string) string {
 	return domain
 }
 
+// Load reads a JSON configuration file from the given path, applies defaults, and validates fields.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("не могу прочитать конфиг %s: %w", path, err)
+		return nil, fmt.Errorf("cannot read config %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
+		return nil, fmt.Errorf("JSON parsing error: %w", err)
 	}
 
 	applyDefaults(&cfg)
 
 	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("ошибка конфига: %w", err)
+		return nil, fmt.Errorf("config error: %w", err)
 	}
 
 	return &cfg, nil
@@ -146,19 +152,20 @@ func (c *Config) validate() error {
 	}
 	for field, val := range required {
 		if val == "" {
-			return fmt.Errorf("поле %q обязательно", field)
+			return fmt.Errorf("field %q is required", field)
 		}
 	}
 	if c.Clone.Certbot && c.Clone.CertbotEmail == "" {
-		return fmt.Errorf("clone.certbot_email обязателен если certbot=true")
+		return fmt.Errorf("clone.certbot_email is required if certbot=true")
 	}
 	return nil
 }
 
+// LoadDomains reads a list of domains from a text file, ignoring empty lines and comments.
 func LoadDomains(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("не могу прочитать файл доменов %s: %w", path, err)
+		return nil, fmt.Errorf("cannot read domains file %s: %w", path, err)
 	}
 
 	var domains []string
@@ -170,7 +177,7 @@ func LoadDomains(path string) ([]string, error) {
 			continue
 		}
 		if seen[line] {
-			fmt.Fprintf(os.Stderr, "⚠️  строка %d: дубликат %q — пропущен\n", i+1, line)
+			fmt.Fprintf(os.Stderr, "⚠️  line %d: duplicate %q — skipped\n", i+1, line)
 			continue
 		}
 		seen[line] = true
@@ -178,7 +185,7 @@ func LoadDomains(path string) ([]string, error) {
 	}
 
 	if len(domains) == 0 {
-		return nil, fmt.Errorf("файл доменов пустой или все строки закомментированы")
+		return nil, fmt.Errorf("domains file is empty or all lines are commented out")
 	}
 
 	return domains, nil

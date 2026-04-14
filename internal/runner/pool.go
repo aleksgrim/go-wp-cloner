@@ -14,13 +14,17 @@ import (
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
+// EventType represents the category of an execution event.
 type EventType string
 
 const (
+	// EventStep is fired multiple times during a domain's cloning process.
 	EventStep EventType = "step"
+	// EventDone is fired once when a domain's cloning process is finished.
 	EventDone EventType = "done"
 )
 
+// Event contains details about the progress of cloning tasks.
 type Event struct {
 	Type   EventType
 	Domain string
@@ -30,13 +34,15 @@ type Event struct {
 	Total  int
 }
 
+// Pool manages parallel execution of cloning tasks for multiple domains.
 type Pool struct {
 	cfg     *config.Config
 	domains []string
 	onEvent func(Event)
-	sysMu   *sync.Mutex // общий мьютекс для всех воркеров
+	sysMu   *sync.Mutex // global mutex for all workers
 }
 
+// New initializes a new Pool with the given configuration and domain list.
 func New(cfg *config.Config, domains []string, onEvent func(Event)) *Pool {
 	return &Pool{
 		cfg:     cfg,
@@ -46,6 +52,7 @@ func New(cfg *config.Config, domains []string, onEvent func(Event)) *Pool {
 	}
 }
 
+// Run starts the worker pool and executes cloning tasks in parallel, respecting the worker limit.
 func (p *Pool) Run() []cloner.Result {
 	total := len(p.domains)
 	results := make([]cloner.Result, total)
@@ -89,7 +96,7 @@ func (p *Pool) Run() []cloner.Result {
 
 			if result.Success && result.Credentials != nil {
 				if err := saveCredentials(p.cfg.Credentials.Dir, result.Credentials); err != nil {
-					fmt.Fprintf(os.Stderr, "⚠️  credentials для %s: %v\n", domain, err)
+					fmt.Fprintf(os.Stderr, "⚠️  credentials for %s: %v\n", domain, err)
 				}
 			}
 
@@ -145,12 +152,13 @@ WordPress:
 	return os.WriteFile(filepath.Join(dir, "credentials.txt"), []byte(content), 0600)
 }
 
+// Summary generates a formatted string showing the overall results and timings of all tasks.
 func Summary(results []cloner.Result, totalElapsed time.Duration, credsDir string) string {
 	var sb strings.Builder
 	var success, failed int
 
 	sb.WriteString("\n" + strings.Repeat("─", 72) + "\n")
-	sb.WriteString("  ИТОГ\n")
+	sb.WriteString("  SUMMARY\n")
 	sb.WriteString(strings.Repeat("─", 72) + "\n")
 
 	for _, r := range results {
@@ -169,7 +177,7 @@ func Summary(results []cloner.Result, totalElapsed time.Duration, credsDir strin
 
 	sb.WriteString(strings.Repeat("─", 72) + "\n")
 	sb.WriteString(fmt.Sprintf(
-		"  Успешно: %d  |  Ошибки: %d  |  Всего: %d  |  Время: %s\n",
+		"  Success: %d  |  Errors: %d  |  Total: %d  |  Time: %s\n",
 		success, failed, len(results), fmtDur(totalElapsed),
 	))
 	if success > 0 {

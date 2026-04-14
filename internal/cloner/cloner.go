@@ -12,16 +12,23 @@ import (
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
+// StepStatus represents the current state of a cloning step.
 type StepStatus string
 
 const (
+	// StatusPending indicates the step has not started yet.
 	StatusPending StepStatus = "pending"
+	// StatusRunning indicates the step is currently in progress.
 	StatusRunning StepStatus = "running"
-	StatusDone    StepStatus = "done"
-	StatusFailed  StepStatus = "failed"
+	// StatusDone indicates the step finished successfully.
+	StatusDone StepStatus = "done"
+	// StatusFailed indicates the step encountered an error.
+	StatusFailed StepStatus = "failed"
+	// StatusSkipped indicates the step was intentionally bypassed.
 	StatusSkipped StepStatus = "skipped"
 )
 
+// Step represents a single atomic operation in the site cloning process.
 type Step struct {
 	Name    string        `json:"name"`
 	Status  StepStatus    `json:"status"`
@@ -29,6 +36,7 @@ type Step struct {
 	Elapsed time.Duration `json:"elapsed"`
 }
 
+// Credentials holds all generated secrets and details for a newly cloned site.
 type Credentials struct {
 	Domain       string
 	SiteUser     string
@@ -39,6 +47,7 @@ type Credentials struct {
 	SFTPPassword string
 }
 
+// Result contains the final status and step-by-step history of a site's cloning operation.
 type Result struct {
 	Domain      string        `json:"domain"`
 	Success     bool          `json:"success"`
@@ -49,30 +58,32 @@ type Result struct {
 	Credentials *Credentials  `json:"credentials,omitempty"`
 }
 
+// OnStepFn is a callback used to notify about the status of an individual step.
 type OnStepFn func(domain string, step Step)
 
+// Cloner orchestrates the full site cloning process on a remote server.
 type Cloner struct {
 	cfg    *config.Config
 	client *ssh.Client
 	sysMu  *sync.Mutex
 }
 
+// New initializes a new Cloner with the provided configuration, SSH client, and a system synchronization mutex.
 func New(cfg *config.Config, client *ssh.Client, sysMu *sync.Mutex) *Cloner {
 	return &Cloner{cfg: cfg, client: client, sysMu: sysMu}
 }
 
-// writefile записывает произвольный текст в файл на сервере через base64.
-// Это единственный надёжный способ — echo/cat ломаются на спецсимволах
-// которые есть в WP солях, nginx конфигах и т.д.
+// writefile reliably writes text content to a remote file path using base64 encoding to avoid shell escaping issues.
 func (c *Cloner) writefile(content, remotePath string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	cmd := fmt.Sprintf("echo '%s' | base64 -d | sudo tee %s > /dev/null", encoded, remotePath)
 	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("запись %s: %w", remotePath, err)
+		return fmt.Errorf("writing %s: %w", remotePath, err)
 	}
 	return nil
 }
 
+// Clone performs the full sequence of steps required to clone a WordPress site.
 func (c *Cloner) Clone(domain string, onStep OnStepFn) Result {
 	started := time.Now()
 	result := Result{Domain: domain}
@@ -88,13 +99,13 @@ func (c *Cloner) Clone(domain string, onStep OnStepFn) Result {
 
 	dbPass, err := genPassword(32)
 	if err != nil {
-		result.Error = fmt.Errorf("генерация db пароля: %w", err)
+		result.Error = fmt.Errorf("generating db password: %w", err)
 		result.ErrStr = result.Error.Error()
 		return result
 	}
 	sftpPass, err := genPassword(32)
 	if err != nil {
-		result.Error = fmt.Errorf("генерация sftp пароля: %w", err)
+		result.Error = fmt.Errorf("generating sftp password: %w", err)
 		result.ErrStr = result.Error.Error()
 		return result
 	}
@@ -221,7 +232,7 @@ func (c *Cloner) Clone(domain string, onStep OnStepFn) Result {
 	return result
 }
 
-// ── Шаги ──────────────────────────────────────────────────────────────────────
+// ── Internal Steps Implementation ───────────────────────────────────────────
 
 func (c *Cloner) stepSystemUser(siteUser, sftpPass string) error {
 	res, _ := c.client.Run(fmt.Sprintf("id -u %s 2>/dev/null", siteUser))
@@ -298,7 +309,7 @@ php_admin_value[opcache.save_comments] = 1
 		return fmt.Errorf("php-fpm --test: %w", err)
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf("systemctl restart php%s-fpm", phpVer)); err != nil {
-		return fmt.Errorf("restart php-fpm: %w", err)
+		return fmt.Errorf("restarting php-fpm: %w", err)
 	}
 	return nil
 }
@@ -412,14 +423,14 @@ func (c *Cloner) stepMySQL(siteName, dbPass string) error {
 		}
 	}
 
-	// Импортируем дамп из источника
+	// Import dump from source
 	importCmd := fmt.Sprintf(
 		"sudo mysqldump -uroot -p'%s' %s | sudo mysql -uroot -p'%s' %s",
 		rootPass, c.cfg.Source.DBName,
 		rootPass, siteName,
 	)
 	if _, err := c.client.RunOrFail(importCmd); err != nil {
-		return fmt.Errorf("импорт дампа: %w", err)
+		return fmt.Errorf("importing dump: %w", err)
 	}
 
 	return nil
@@ -436,7 +447,7 @@ func (c *Cloner) stepRsync(webroot string) error {
 func (c *Cloner) stepWPConfig(domain, webroot, dbName, dbPass string) error {
 	saltsRes, err := c.client.RunOrFail("curl -s https://api.wordpress.org/secret-key/1.1/salt/")
 	if err != nil {
-		return fmt.Errorf("получение WP солей: %w", err)
+		return fmt.Errorf("getting WP salts: %w", err)
 	}
 
 	protocol := "http"
@@ -535,7 +546,7 @@ func (c *Cloner) stepSFTPChroot(siteUser, chrootDir string) error {
 		marker, siteUser, chrootDir, marker,
 	)
 	if err := c.writefile(block, "/tmp/sshd_block_"+siteUser); err != nil {
-		return fmt.Errorf("запись temp блока: %w", err)
+		return fmt.Errorf("writing temp block: %w", err)
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf(
 		"bash -c 'cat /tmp/sshd_block_%s >> /etc/ssh/sshd_config && rm /tmp/sshd_block_%s'",

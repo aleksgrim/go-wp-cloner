@@ -1,8 +1,8 @@
-# Список доменов для клонирования
-# Пустые строки и строки начинающиеся с # — игнорируются
+# List of domains to clone
+# Empty lines and lines starting with # are ignored
 
 domain1.com
 domain2.com
 domain3.com
-# domain4.com   <- этот пропустим пока
+# domain4.com   <- skip this one for now
 domain5.com
