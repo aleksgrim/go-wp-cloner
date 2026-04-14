@@ -4,6 +4,7 @@ wp-cloner-linux-amd64
 wp-cloner-linux-arm64
 wp-cloner-darwin-amd64
 wp-cloner-darwin-arm64
+wp-cloner-linux
 *.exe
 
 # Config with real credentials — never commit

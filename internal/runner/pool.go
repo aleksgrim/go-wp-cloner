@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aleksgrim/wp-cloner/internal/cloner"
-	"github.com/aleksgrim/wp-cloner/internal/config"
-	"github.com/aleksgrim/wp-cloner/internal/ssh"
+	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
+	"github.com/aleksgrim/go-wp-cloner/internal/config"
+	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
 type EventType string

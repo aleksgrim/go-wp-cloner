@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aleksgrim/wp-cloner/internal/config"
-	"github.com/aleksgrim/wp-cloner/internal/ssh"
+	"github.com/aleksgrim/go-wp-cloner/internal/config"
+	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
 type StepStatus string
@@ -391,19 +391,18 @@ func (c *Cloner) stepNginxVhost(domain, webroot, sockPath string) error {
 }
 
 func (c *Cloner) stepMySQL(siteName, dbPass string) error {
-	auth := c.mysqlAuth()
 	cmds := []string{
 		fmt.Sprintf(
-			"%s -e \"CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\"",
-			auth, siteName,
+			`sudo mysql -uroot -e "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"`,
+			siteName,
 		),
 		fmt.Sprintf(
-			"%s -e \"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\"",
-			auth, siteName, dbPass,
+			`sudo mysql -uroot -e "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';"`,
+			siteName, dbPass,
 		),
 		fmt.Sprintf(
-			"%s -e \"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;\"",
-			auth, siteName, siteName,
+			`sudo mysql -uroot -e "GRANT ALL PRIVILEGES ON %s.* TO '%s'@'localhost'; FLUSH PRIVILEGES;"`,
+			siteName, siteName,
 		),
 	}
 	for _, cmd := range cmds {

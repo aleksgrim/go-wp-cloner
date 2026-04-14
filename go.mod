@@ -1,3 +1,3 @@
-module github.com/aleksgrim/wp-cloner
+module github.com/aleksgrim/go-wp-cloner
 
 go 1.22

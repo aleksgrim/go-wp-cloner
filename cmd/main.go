@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aleksgrim/wp-cloner/internal/cloner"
-	"github.com/aleksgrim/wp-cloner/internal/config"
-	"github.com/aleksgrim/wp-cloner/internal/runner"
-	"github.com/aleksgrim/wp-cloner/internal/ssh"
+	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
+	"github.com/aleksgrim/go-wp-cloner/internal/config"
+	"github.com/aleksgrim/go-wp-cloner/internal/runner"
+	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
 const version = "0.2.0"
