@@ -397,6 +397,11 @@ func (c *Cloner) stepMySQL(siteName, dbPass string) error {
 			`%s -e "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';"`,
 			auth, siteName, dbPass,
 		),
+		// Обновляем пароль если юзер уже существовал с другим паролем
+		fmt.Sprintf(
+			`%s -e "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';"`,
+			auth, siteName, dbPass,
+		),
 		fmt.Sprintf(
 			`%s -e "GRANT ALL PRIVILEGES ON %s.* TO '%s'@'localhost'; FLUSH PRIVILEGES;"`,
 			auth, siteName, siteName,
