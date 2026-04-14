@@ -1,0 +1,31 @@
+server:
+  host: "123.45.67.89"       # IP твоего сервера
+  port: 22
+  user: "root"
+  key_path: "~/.ssh/id_rsa"  # путь к SSH ключу
+
+source:
+  domain: "source-site.com"
+  wp_path: "/var/www/source-site.com"
+  db_name: "wp_source"
+
+clone:
+  workers: 10                 # кол-во параллельных воркеров
+                              # 10 — хороший старт, можно поднять до 20-30
+  wp_path_template: "/var/www/{domain}"
+  db_prefix: "wp_"
+
+  # MySQL root доступ для создания новых БД
+  db_root_pass: "your_mysql_root_password"
+
+  # Юзер которому выдаются права на новые БД
+  # (должен уже существовать в MySQL)
+  db_user: "wp_user"
+
+  # Certbot SSL (выключи если DNS ещё не настроен)
+  certbot: true
+  certbot_email: "admin@yourdomain.com"
+
+  # Кастомный nginx шаблон (опционально)
+  # Если не указан — используется встроенный дефолтный
+  # nginx_template: "/etc/nginx/templates/wp.conf.template"

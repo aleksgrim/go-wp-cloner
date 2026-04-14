@@ -1,0 +1,28 @@
+{
+  "server": {
+    "host": "123.45.67.89",
+    "port": 22,
+    "user": "root",
+    "key_path": "~/.ssh/id_rsa"
+  },
+  "source": {
+    "domain": "source-site.com",
+    "wp_path": "/var/www/source-site---admin/source-site.com/public",
+    "db_name": "source_site",
+    "db_user": "source_site",
+    "db_pass": "SOURCE_DB_PASSWORD"
+  },
+  "clone": {
+    "workers": 10,
+    "php_version": "8.5",
+    "username_suffix": "---admin",
+    "db_root_pass": "YOUR_MYSQL_ROOT_PASSWORD",
+    "certbot": false,
+    "certbot_email": "",
+    "nginx_cache_path": "/var/cache/nginx/fastcgi",
+    "nginx_cache_zone": "FASTCGI_CACHE"
+  },
+  "credentials": {
+    "dir": "./credentials"
+  }
+}
