@@ -20,7 +20,8 @@
     "certbot": false,
     "certbot_email": "",
     "nginx_cache_path": "/var/cache/nginx/fastcgi",
-    "nginx_cache_zone": "FASTCGI_CACHE"
+    "nginx_cache_zone": "FASTCGI_CACHE",
+    "command_timeout_sec": 600
   },
   "credentials": {
     "dir": "./credentials"

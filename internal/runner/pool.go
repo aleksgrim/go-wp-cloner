@@ -80,6 +80,7 @@ func (p *Pool) Run() []cloner.Result {
 				p.cfg.Server.Port,
 				p.cfg.Server.User,
 				p.cfg.Server.KeyPath,
+				time.Duration(p.cfg.Clone.CommandTimeoutSec)*time.Second,
 			)
 			defer client.Close()
 

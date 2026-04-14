@@ -34,14 +34,15 @@ type SourceConfig struct {
 
 // CloneConfig contains general settings for the cloning process and isolation target.
 type CloneConfig struct {
-	Workers        int    `json:"workers"`
-	PHPVersion     string `json:"php_version"`
-	UsernameSuffix string `json:"username_suffix"`
-	DBRootPass     string `json:"db_root_pass"`
-	Certbot        bool   `json:"certbot"`
-	CertbotEmail   string `json:"certbot_email"`
-	NginxCachePath string `json:"nginx_cache_path"`
-	NginxCacheZone string `json:"nginx_cache_zone"`
+	Workers           int    `json:"workers"`
+	PHPVersion        string `json:"php_version"`
+	UsernameSuffix    string `json:"username_suffix"`
+	DBRootPass        string `json:"db_root_pass"`
+	Certbot           bool   `json:"certbot"`
+	CertbotEmail      string `json:"certbot_email"`
+	NginxCachePath    string `json:"nginx_cache_path"`
+	NginxCacheZone    string `json:"nginx_cache_zone"`
+	CommandTimeoutSec int    `json:"command_timeout_sec"`
 }
 
 // CredConfig contains local storage settings for generated passwords.
@@ -135,6 +136,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Credentials.Dir == "" {
 		cfg.Credentials.Dir = "./credentials"
+	}
+	if cfg.Clone.CommandTimeoutSec == 0 {
+		cfg.Clone.CommandTimeoutSec = 600 // 10 minutes per command
 	}
 }
 

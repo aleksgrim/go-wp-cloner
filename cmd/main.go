@@ -42,7 +42,8 @@ func main() {
 
 	if *testConn {
 		fmt.Printf("\n🔌 Testing SSH to %s@%s...\n", cfg.Server.User, cfg.Server.Host)
-		client := ssh.NewClient(cfg.Server.Host, cfg.Server.Port, cfg.Server.User, cfg.Server.KeyPath)
+		client := ssh.NewClient(cfg.Server.Host, cfg.Server.Port, cfg.Server.User, cfg.Server.KeyPath,
+			time.Duration(cfg.Clone.CommandTimeoutSec)*time.Second)
 		if err := client.Test(); err != nil {
 			die("%v", err)
 		}

@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ type Client struct {
 	port    int
 	user    string
 	keyPath string
+	timeout time.Duration
 }
 
 // Result contains the output and metadata of an executed command.
@@ -25,21 +27,25 @@ type Result struct {
 	Elapsed  time.Duration
 }
 
-// NewClient creates a new SSH client with the specified connection details.
-func NewClient(host string, port int, user, keyPath string) *Client {
+// NewClient creates a new SSH client with the specified connection details and per-command timeout.
+func NewClient(host string, port int, user, keyPath string, timeout time.Duration) *Client {
 	return &Client{
 		host:    host,
 		port:    port,
 		user:    user,
 		keyPath: expandHome(keyPath),
+		timeout: timeout,
 	}
 }
 
-
-// Run executes a command on the remote server and returns the result.
+// Run executes a command on the remote server with the configured timeout and returns the result.
+// If the timeout is exceeded, the SSH process is killed and an error is returned.
 func (c *Client) Run(command string) (*Result, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+
 	start := time.Now()
-	cmd := exec.Command("ssh", c.buildArgs(command)...)
+	cmd := exec.CommandContext(ctx, "ssh", c.buildArgs(command)...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -54,6 +60,9 @@ func (c *Client) Run(command string) (*Result, error) {
 	}
 
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return result, fmt.Errorf("command timed out after %s: %s", c.timeout, command)
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
 			return result, nil
