@@ -61,18 +61,30 @@ func New(cfg *config.Config, client *ssh.Client, sysMu *sync.Mutex) *Cloner {
 	return &Cloner{cfg: cfg, client: client, sysMu: sysMu}
 }
 
+// writefile записывает произвольный текст в файл на сервере через base64.
+// Это единственный надёжный способ — echo/cat ломаются на спецсимволах
+// которые есть в WP солях, nginx конфигах и т.д.
+func (c *Cloner) writefile(content, remotePath string) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d | sudo tee %s > /dev/null", encoded, remotePath)
+	if _, err := c.client.RunOrFail(cmd); err != nil {
+		return fmt.Errorf("запись %s: %w", remotePath, err)
+	}
+	return nil
+}
+
 func (c *Cloner) Clone(domain string, onStep OnStepFn) Result {
 	started := time.Now()
 	result := Result{Domain: domain}
 
 	cfg := c.cfg.Clone
 
-	siteUser := cfg.SiteUser(domain)
-	siteName := config.SiteName(domain)
-	webroot := cfg.Webroot(domain)
+	siteUser  := cfg.SiteUser(domain)
+	siteName  := config.SiteName(domain)
+	webroot   := cfg.Webroot(domain)
 	chrootDir := cfg.ChrootDir(domain)
-	sockPath := cfg.SockPath(domain)
-	poolName := cfg.PoolName(domain)
+	sockPath  := cfg.SockPath(domain)
+	poolName  := cfg.PoolName(domain)
 
 	dbPass, err := genPassword(32)
 	if err != nil {
@@ -222,7 +234,7 @@ func (c *Cloner) stepSystemUser(siteUser, sftpPass string) error {
 		}
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf(
-		"bash -c \"echo '%s:%s' | chpasswd\"",
+		`bash -c "echo '%s:%s' | chpasswd"`,
 		siteUser, sftpPass,
 	)); err != nil {
 		return fmt.Errorf("chpasswd: %w", err)
@@ -279,14 +291,8 @@ php_admin_value[opcache.save_comments] = 1
 `, poolName, siteUser, sockPath)
 
 	confPath := fmt.Sprintf("/etc/php/%s/fpm/pool.d/%s.conf", phpVer, poolName)
-
-	// Пишем через sudo tee (cat > не работает с sudo)
-	cmd := fmt.Sprintf(
-		"echo '%s' | sudo tee %s > /dev/null",
-		poolConf, confPath,
-	)
-	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("запись pool конфига: %w", err)
+	if err := c.writefile(poolConf, confPath); err != nil {
+		return err
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf("php-fpm%s --test 2>&1", phpVer)); err != nil {
 		return fmt.Errorf("php-fpm --test: %w", err)
@@ -299,6 +305,7 @@ php_admin_value[opcache.save_comments] = 1
 
 func (c *Cloner) stepFastCGICache() error {
 	cfg := c.cfg.Clone
+
 	cacheConf := fmt.Sprintf(`fastcgi_cache_path %s
     levels=1:2
     keys_zone=%s:100m
@@ -308,22 +315,13 @@ func (c *Cloner) stepFastCGICache() error {
 fastcgi_cache_key "$scheme$request_method$host$request_uri";
 `, cfg.NginxCachePath, cfg.NginxCacheZone)
 
-	// Разбиваем на отдельные команды — && не работает через sudo
 	if _, err := c.client.RunSudo(fmt.Sprintf("mkdir -p %s", cfg.NginxCachePath)); err != nil {
 		return err
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf("chown www-data:www-data %s", cfg.NginxCachePath)); err != nil {
 		return err
 	}
-
-	cmd := fmt.Sprintf(
-		"echo '%s' | sudo tee /etc/nginx/conf.d/fastcgi_cache.conf > /dev/null",
-		cacheConf,
-	)
-	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("fastcgi_cache.conf: %w", err)
-	}
-	return nil
+	return c.writefile(cacheConf, "/etc/nginx/conf.d/fastcgi_cache.conf")
 }
 
 func (c *Cloner) stepNginxVhost(domain, webroot, sockPath string) error {
@@ -374,12 +372,8 @@ func (c *Cloner) stepNginxVhost(domain, webroot, sockPath string) error {
 }`, domain, webroot, sockPath, cacheZone)
 
 	confPath := fmt.Sprintf("/etc/nginx/sites-available/%s", domain)
-	cmd := fmt.Sprintf(
-		"echo '%s' | sudo tee %s > /dev/null",
-		vhostConf, confPath,
-	)
-	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("запись nginx vhost: %w", err)
+	if err := c.writefile(vhostConf, confPath); err != nil {
+		return err
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf(
 		"ln -sf /etc/nginx/sites-available/%s /etc/nginx/sites-enabled/%s",
@@ -461,15 +455,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 require_once ABSPATH . 'wp-settings.php';
 `, dbName, dbName, dbPass, saltsRes.Stdout, protocol, domain, protocol, domain)
 
-	confPath := fmt.Sprintf("%s/wp-config.php", webroot)
-	cmd := fmt.Sprintf(
-		"echo '%s' | sudo tee %s > /dev/null",
-		wpConfig, confPath,
-	)
-	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("запись wp-config.php: %w", err)
-	}
-	return nil
+	return c.writefile(wpConfig, fmt.Sprintf("%s/wp-config.php", webroot))
 }
 
 func (c *Cloner) stepSearchReplace(domain, webroot string) error {
@@ -519,10 +505,8 @@ func (c *Cloner) stepSFTPChroot(siteUser, chrootDir string) error {
 
 	marker := fmt.Sprintf("SFTP CHROOT %s", siteUser)
 
-	// Используем Run а не RunOrFail — grep возвращает exit 1 если не найдено
 	res, _ := c.client.Run(fmt.Sprintf("sudo grep -c 'BEGIN %s' /etc/ssh/sshd_config", marker))
 	if res != nil && res.ExitCode == 0 && res.Stdout != "0" {
-		// блок уже есть — пропускаем
 		return nil
 	}
 
@@ -532,12 +516,17 @@ func (c *Cloner) stepSFTPChroot(siteUser, chrootDir string) error {
 	))
 
 	block := fmt.Sprintf(
-		"\n# BEGIN %s\nMatch User %s\n    ChrootDirectory %s\n    ForceCommand internal-sftp\n    AllowTcpForwarding no\n    X11Forwarding no\n    PasswordAuthentication yes\n# END %s",
+		"\n# BEGIN %s\nMatch User %s\n    ChrootDirectory %s\n    ForceCommand internal-sftp\n    AllowTcpForwarding no\n    X11Forwarding no\n    PasswordAuthentication yes\n# END %s\n",
 		marker, siteUser, chrootDir, marker,
 	)
-	cmd := fmt.Sprintf(`echo '%s' | sudo tee -a /etc/ssh/sshd_config > /dev/null`, block)
-	if _, err := c.client.RunOrFail(cmd); err != nil {
-		return fmt.Errorf("sshd_config: %w", err)
+	if err := c.writefile(block, "/tmp/sshd_block_"+siteUser); err != nil {
+		return fmt.Errorf("запись temp блока: %w", err)
+	}
+	if _, err := c.client.RunSudo(fmt.Sprintf(
+		"cat /tmp/sshd_block_%s >> /etc/ssh/sshd_config && rm /tmp/sshd_block_%s",
+		siteUser, siteUser,
+	)); err != nil {
+		return fmt.Errorf("append sshd_config: %w", err)
 	}
 	if _, err := c.client.RunSudo("sshd -t"); err != nil {
 		return fmt.Errorf("sshd -t: %w", err)
@@ -558,10 +547,6 @@ func (c *Cloner) stepCertbot(domain string) error {
 		return fmt.Errorf("%w\n%s", err, res.Stdout)
 	}
 	return err
-}
-
-func (c *Cloner) mysqlAuth() string {
-	return fmt.Sprintf("sudo mysql -uroot")
 }
 
 func genPassword(length int) (string, error) {
