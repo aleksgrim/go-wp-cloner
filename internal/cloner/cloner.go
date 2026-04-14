@@ -538,7 +538,7 @@ func (c *Cloner) stepSFTPChroot(siteUser, chrootDir string) error {
 		return fmt.Errorf("запись temp блока: %w", err)
 	}
 	if _, err := c.client.RunSudo(fmt.Sprintf(
-		"cat /tmp/sshd_block_%s >> /etc/ssh/sshd_config && rm /tmp/sshd_block_%s",
+		"bash -c 'cat /tmp/sshd_block_%s >> /etc/ssh/sshd_config && rm /tmp/sshd_block_%s'",
 		siteUser, siteUser,
 	)); err != nil {
 		return fmt.Errorf("append sshd_config: %w", err)
