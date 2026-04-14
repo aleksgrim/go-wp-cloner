@@ -15,20 +15,91 @@ Each clone gets:
 - `wp-config.php` with fresh WordPress salts from the WP API
 - Credentials saved locally to `credentials/{domain}/credentials.txt`
 
-## Requirements
+## Server Requirements
 
-### Local machine
-- Go 1.22+
+### Operating System
+- Ubuntu 22.04 LTS or Ubuntu 24.04 LTS
+- Other Debian-based distros may work but are not tested
+
+### SSH Access
+- SSH key-based auth (password auth for the deploy user must work too)
+- Deploy user must have **passwordless sudo**:
+```bash
+  echo "youruser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+```
+- SSH port must be open in firewall
+- `BatchMode` compatible — no interactive prompts during connection
+
+### Required packages
+Install all dependencies:
+```bash
+apt update && apt install -y \
+  nginx \
+  mysql-server \
+  rsync \
+  curl \
+  php8.5-fpm \
+  php8.5-mysql \
+  php8.5-curl \
+  php8.5-gd \
+  php8.5-mbstring \
+  php8.5-xml \
+  php8.5-zip \
+  php8.5-intl
+```
+
+Install WP-CLI:
+```bash
+curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+chmod +x wp-cli.phar
+mv wp-cli.phar /usr/local/bin/wp
+```
+
+### MySQL
+- MySQL root password must be set and added to `config.json` as `db_root_pass`
+- Root user must authenticate via password (not only unix socket):
+```bash
+  sudo mysql -uroot
+  ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'yourpassword';
+  FLUSH PRIVILEGES;
+```
+
+### Nginx
+- Default nginx install is fine
+- `sites-available` / `sites-enabled` structure must exist (default on Ubuntu)
+- FastCGI cache directory will be created automatically at the path specified in config (`/var/cache/nginx/fastcgi` by default)
+
+### PHP-FPM
+- Version must match `php_version` in `config.json`
+- Default pool `www.conf` can stay — the tool creates additional per-site pools
+- `www-data` group must exist (default on Ubuntu)
+
+### SFTP / SSH
+- `internal-sftp` subsystem must be enabled in `/etc/ssh/sshd_config`:
+```
+  Subsystem sftp internal-sftp
+```
+  This is the default on Ubuntu — no changes needed
+- The tool adds `Match User` blocks to `sshd_config` automatically
+
+### Source WordPress site
+The source site must be fully working before cloning:
+- Files at the path specified in `source.wp_path`
+- Database accessible with credentials in `source.db_name`, `source.db_user`, `source.db_pass`
+- WP-CLI must be able to connect: `sudo wp db check --path=/your/source/path --allow-root`
+
+### Firewall
+Open required ports:
+```bash
+ufw allow 22    # or your custom SSH port
+ufw allow 80    # HTTP
+ufw allow 443   # HTTPS (if using Certbot)
+```
+
+### Local machine (where you run wp-cloner)
+- Go 1.22+ (only needed to build from source)
 - `ssh` binary in PATH
-
-### Remote server (Ubuntu)
-- `nginx`
-- `php{version}-fpm`
-- `mysql` / `mysqldump`
-- `rsync`
-- `wp-cli` (available as `wp`)
-- `certbot` (optional, for SSL)
-- SSH user with passwordless `sudo`
+- SSH private key with access to the server
 
 ## Install
 
