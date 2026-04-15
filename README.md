@@ -141,7 +141,9 @@ cp config.json.example config.json
     "certbot": false,
     "certbot_email": "",
     "nginx_cache_path": "/var/cache/nginx/fastcgi",
-    "nginx_cache_zone": "FASTCGI_CACHE"
+    "nginx_cache_zone": "FASTCGI_CACHE",
+    "command_timeout_sec": 600,
+    "log_retention_days": 30
   },
   "credentials": {
     "dir": "./credentials"
@@ -174,9 +176,47 @@ make dry-run
 # Run cloning
 make run
 
+# Remove sites listed in domains.txt
+make remove
+
+# Remove without confirmation prompt (for scripting)
+make remove-force
+
 # Or with custom flags
 go run ./cmd/ -config prod.json -domains batch1.txt -workers 20
 ```
+
+## Removing Sites
+
+The `-remove` flag tears down everything that was created for each domain in `domains.txt`.
+Useful for cleaning up after a failed batch or decommissioning sites.
+
+```bash
+# Interactive — shows a summary and asks for 'yes'
+make remove
+
+# Non-interactive — skips the confirmation prompt
+make remove-force
+
+# Custom domains file
+go run ./cmd/ -remove -domains failed.txt
+```
+
+What gets removed per domain (in order):
+
+| Step | What |
+|------|------|
+| Nginx vhost | removes symlink + config, reloads nginx |
+| PHP-FPM pool | removes pool config, restarts php-fpm |
+| MySQL DB & user | `DROP DATABASE IF EXISTS`, `DROP USER IF EXISTS` |
+| Files & dirs | `rm -rf` webroot and chroot directory |
+| System user | kills lingering processes, then `userdel` |
+| SSH chroot block | removes `Match User` block from sshd_config, reloads sshd |
+| Local credentials | removes `credentials/{domain}/` directory |
+
+> Steps are **best-effort** — if one fails, the rest still run. The summary shows which domains had partial cleanup.
+
+All removal activity is logged to `logs/YYYY-MM-DD.log` alongside clone operations.
 
 ## What gets created per domain
 
@@ -263,6 +303,26 @@ WordPress:
 ```
 
 > ⚠️ `credentials/` is in `.gitignore` — never commit passwords.
+
+## Logging
+
+Every run writes a timestamped log to `logs/YYYY-MM-DD.log`:
+
+```
+2026-04-14 20:15:46.123 [INFO ] === wp-cloner v0.3.0 started — 150 domains, 10 workers ===
+2026-04-14 20:15:46.201 [START] [example.com] cloning started
+2026-04-14 20:15:46.210 [STEP ] [example.com] RUNNING  System user
+2026-04-14 20:15:47.850 [STEP ] [example.com] OK       System user            1.6s
+2026-04-14 20:15:47.860 [STEP ] [example.com] RUNNING  MySQL database
+2026-04-14 20:15:49.300 [STEP ] [example.com] FAILED   MySQL database         Access denied...
+2026-04-14 20:15:49.310 [FAIL ] [example.com] ✗ failed in 3.1s — [MySQL database] Access denied...
+...
+2026-04-14 21:00:00.000 [SUMRY] batch finished — total=150 ok=148 err=2 elapsed=44m12s
+```
+
+Log files older than `log_retention_days` days (default: 30) are deleted automatically on each run.
+
+`logs/` is in `.gitignore`.
 
 
 ## License

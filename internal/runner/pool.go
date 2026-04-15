@@ -12,6 +12,7 @@ import (
 	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
 	"github.com/aleksgrim/go-wp-cloner/internal/config"
 	"github.com/aleksgrim/go-wp-cloner/internal/logger"
+	"github.com/aleksgrim/go-wp-cloner/internal/remover"
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
 
@@ -138,6 +139,130 @@ func (p *Pool) Run() []cloner.Result {
 
 	wg.Wait()
 	return results
+}
+
+// RemoveEvent carries progress updates from a removal run.
+type RemoveEvent struct {
+	Type   EventType
+	Domain string
+	Step   *remover.Step
+	Result *remover.Result
+	Done   int
+	Total  int
+}
+
+// RunRemove tears down all sites in the pool's domain list in parallel.
+func (p *Pool) RunRemove(onEvent func(RemoveEvent)) []remover.Result {
+	total := len(p.domains)
+	results := make([]remover.Result, total)
+
+	var (
+		done atomic.Int32
+		mu   sync.Mutex
+	)
+
+	sem := make(chan struct{}, p.cfg.Clone.Workers)
+	var wg sync.WaitGroup
+
+	for i, domain := range p.domains {
+		i, domain := i, domain
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			client := ssh.NewClient(
+				p.cfg.Server.Host,
+				p.cfg.Server.Port,
+				p.cfg.Server.User,
+				p.cfg.Server.KeyPath,
+				time.Duration(p.cfg.Clone.CommandTimeoutSec)*time.Second,
+			)
+			defer client.Close()
+
+			if p.log != nil {
+				p.log.Info("[%s] removal started", domain)
+			}
+
+			r := remover.New(p.cfg, client, p.sysMu)
+			result := r.Remove(domain, func(d string, step remover.Step) {
+				if p.log != nil {
+					switch step.Status {
+					case remover.StatusRunning:
+						p.log.Step(d, "RUNNING", step.Name, "")
+					case remover.StatusDone:
+						p.log.Step(d, "OK", step.Name, fmtDur(step.Elapsed))
+					case remover.StatusFailed:
+						p.log.Step(d, "FAILED", step.Name, step.Error)
+					}
+				}
+				onEvent(RemoveEvent{
+					Type:   EventStep,
+					Domain: d,
+					Step:   &step,
+					Done:   int(done.Load()),
+					Total:  total,
+				})
+			})
+
+			if p.log != nil {
+				p.log.DomainDone(domain, result.Success, result.Elapsed, result.ErrStr)
+			}
+
+			n := int(done.Add(1))
+
+			mu.Lock()
+			results[i] = result
+			mu.Unlock()
+
+			onEvent(RemoveEvent{
+				Type:   EventDone,
+				Domain: domain,
+				Result: &result,
+				Done:   n,
+				Total:  total,
+			})
+		}()
+	}
+
+	wg.Wait()
+	return results
+}
+
+// RemoveSummary formats the final removal report.
+func RemoveSummary(results []remover.Result, elapsed time.Duration) string {
+	var sb strings.Builder
+	var success, failed int
+
+	sb.WriteString("\n" + strings.Repeat("─", 72) + "\n")
+	sb.WriteString("  REMOVAL SUMMARY\n")
+	sb.WriteString(strings.Repeat("─", 72) + "\n")
+
+	for _, r := range results {
+		if r.Success {
+			success++
+			sb.WriteString(fmt.Sprintf("  ✅  %-42s %s\n", r.Domain, fmtDur(r.Elapsed)))
+		} else {
+			failed++
+			errMsg := r.ErrStr
+			if len(errMsg) > 55 {
+				errMsg = errMsg[:52] + "..."
+			}
+			sb.WriteString(fmt.Sprintf("  ⚠️   %-42s %s\n", r.Domain, errMsg))
+		}
+	}
+
+	sb.WriteString(strings.Repeat("─", 72) + "\n")
+	sb.WriteString(fmt.Sprintf(
+		"  Removed: %d  |  Partial: %d  |  Total: %d  |  Time: %s\n",
+		success, failed, len(results), fmtDur(elapsed),
+	))
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
 func saveCredentials(baseDir string, creds *cloner.Credentials) error {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/aleksgrim/go-wp-cloner/internal/cloner"
 	"github.com/aleksgrim/go-wp-cloner/internal/config"
 	"github.com/aleksgrim/go-wp-cloner/internal/logger"
+	"github.com/aleksgrim/go-wp-cloner/internal/remover"
 	"github.com/aleksgrim/go-wp-cloner/internal/runner"
 	"github.com/aleksgrim/go-wp-cloner/internal/ssh"
 )
@@ -24,6 +26,8 @@ func main() {
 		dryRun      = flag.Bool("dry-run", false, "Show plan without execution")
 		showVersion = flag.Bool("version", false, "Version")
 		workers     = flag.Int("workers", 0, "Override workers count")
+		removeMode  = flag.Bool("remove", false, "Remove sites listed in domains file")
+		forceRemove = flag.Bool("force", false, "Skip confirmation prompt for -remove")
 	)
 	flag.Usage = printUsage
 	flag.Parse()
@@ -92,12 +96,59 @@ func main() {
 
 	startTime := time.Now()
 	pool := runner.New(cfg, domains, log, func(e runner.Event) { printEvent(e) })
+
+	// ── Remove mode ────────────────────────────────────────────────────────
+	if *removeMode {
+		if log != nil {
+			log.Info("=== REMOVE MODE — %d domains ===", len(domains))
+		}
+
+		fmt.Printf("\n  ⚠️  REMOVE MODE — will permanently delete:\n")
+		fmt.Printf("      • Nginx vhost configs\n")
+		fmt.Printf("      • PHP-FPM pool configs\n")
+		fmt.Printf("      • MySQL databases and users\n")
+		fmt.Printf("      • Site files and directories\n")
+		fmt.Printf("      • System users\n")
+		fmt.Printf("      • SSH chroot blocks\n")
+		fmt.Printf("\n  Domains (%d):\n", len(domains))
+		for _, d := range domains {
+			fmt.Printf("    - %s\n", d)
+		}
+
+		if !*forceRemove {
+			fmt.Printf("\n  Type 'yes' to confirm: ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			if strings.TrimSpace(scanner.Text()) != "yes" {
+				fmt.Println("  Aborted.")
+				os.Exit(0)
+			}
+		}
+		fmt.Println()
+
+		removeResults := pool.RunRemove(func(e runner.RemoveEvent) { printRemoveEvent(e) })
+		fmt.Println(runner.RemoveSummary(removeResults, time.Since(startTime)))
+
+		if log != nil {
+			var ok, fail int
+			for _, r := range removeResults {
+				if r.Success {
+					ok++
+				} else {
+					fail++
+				}
+			}
+			log.Summary(len(removeResults), ok, fail, time.Since(startTime))
+		}
+		return
+	}
+
+	// ── Clone mode (default) ───────────────────────────────────────────────
 	results := pool.Run()
 
 	summaryStr := runner.Summary(results, time.Since(startTime), cfg.Credentials.Dir)
 	fmt.Println(summaryStr)
 
-	// Write batch summary to log.
 	if log != nil {
 		var ok, fail int
 		for _, r := range results {
@@ -172,6 +223,34 @@ func printEvent(e runner.Event) {
 	}
 }
 
+// printRemoveEvent handles real-time progress from the removal pool.
+func printRemoveEvent(e runner.RemoveEvent) {
+	domain := pad(e.Domain, 36)
+	switch e.Type {
+	case runner.EventStep:
+		if e.Step == nil {
+			return
+		}
+		switch e.Step.Status {
+		case remover.StatusRunning:
+			fmt.Printf("  [%s] 🗑  %s\n", domain, e.Step.Name)
+		case remover.StatusDone:
+			fmt.Printf("  [%s] ✓  %-22s %s\n", domain, e.Step.Name, fmtDur(e.Step.Elapsed))
+		case remover.StatusFailed:
+			fmt.Printf("  [%s] ⚠️  %-22s %s\n", domain, e.Step.Name, shortStr(e.Step.Error, 80))
+		}
+	case runner.EventDone:
+		if e.Result == nil {
+			return
+		}
+		if e.Result.Success {
+			fmt.Printf("\n  ✅  %s — removed in %s [%d/%d]\n\n", e.Domain, fmtDur(e.Result.Elapsed), e.Done, e.Total)
+		} else {
+			fmt.Printf("\n  ⚠️   %s — partial cleanup [%d/%d]\n\n", e.Domain, e.Done, e.Total)
+		}
+	}
+}
+
 // printUsage prints the CLI help message.
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `wp-cloner v%s
@@ -185,6 +264,8 @@ Flags:
   -workers  int     Override workers count
   -test             Test SSH and tools
   -dry-run          Show plan
+  -remove           Remove sites from domains file
+  -force            Skip confirmation prompt (use with -remove)
   -version          Version
 
 `, version)
